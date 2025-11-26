@@ -370,10 +370,38 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   width: 500
   depth: 500
-  scale: 20
-  heightMultiplier: 5
-  seed: 1
   offset: {x: 0, y: 0}
+  scale: 80
+  octaves: 5
+  persistance: 0.5
+  lacunarity: 2
+  heightMultiplier: 40
+  heightCurve:
+    serializedVersion: 2
+    m_Curve:
+    - serializedVersion: 3
+      time: 0
+      value: 0
+      inSlope: 0
+      outSlope: 0
+      tangentMode: 0
+      weightedMode: 0
+      inWeight: 0
+      outWeight: 0
+    - serializedVersion: 3
+      time: 0.8104553
+      value: 1.2690468
+      inSlope: 2
+      outSlope: 2
+      tangentMode: 0
+      weightedMode: 0
+      inWeight: 0
+      outWeight: 0
+    m_PreInfinity: 2
+    m_PostInfinity: 2
+    m_RotationOrder: 4
+  mountainExaggeration: 1
+  seed: 3
   biomes:
   - name: Sea
     color: {r: 0, g: 0, b: 1, a: 1}
@@ -397,7 +425,7 @@ MonoBehaviour:
     - {fileID: 3667025146202082503, guid: df080700c5fdbc2419fcd6b5bea0314d, type: 3}
   - name: Mountain
     color: {r: 0.5, g: 0.5, b: 0.5, a: 1}
-    propDensity: 0.01
+    propDensity: 0
     props:
     - {fileID: 5917395064853871428, guid: bab141a87930ebe4f817baf0d2b9c22a, type: 3}
   tileContainer: {fileID: 0}
