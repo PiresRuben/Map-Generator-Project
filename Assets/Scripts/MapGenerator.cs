@@ -60,10 +60,8 @@ public class MapGenerator : MonoBehaviour
         GenerateMap();
     }
 
-    public void GenerateMap()
+    public void ClearAll()
     {
-        Random.InitState(seed);
-
         if (tileContainer != null)
             Destroy(tileContainer.gameObject);
 
@@ -71,6 +69,13 @@ public class MapGenerator : MonoBehaviour
 
         biomeMaterials.Clear();
         roadPositions.Clear();
+    }
+
+    public void GenerateMap()
+    {
+        Random.InitState(seed);
+
+        ClearAll();
 
         GenerateBiomeMaterials();
         GenerateRoadNetwork();

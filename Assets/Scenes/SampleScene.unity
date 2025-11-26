@@ -372,7 +372,7 @@ MonoBehaviour:
   depth: 500
   scale: 20
   heightMultiplier: 5
-  seed: 1
+  seed: 0
   offset: {x: 0, y: 0}
   biomes:
   - name: Sea
@@ -381,7 +381,7 @@ MonoBehaviour:
     props:
     - {fileID: 0}
   - name: Desert
-    color: {r: 1, g: 0.2705882, b: 0, a: 1}
+    color: {r: 1, g: 0.7821765, b: 0, a: 1}
     propDensity: 0.1
     props:
     - {fileID: 6016008114967433640, guid: d7ad19d6f0d1f4d48a0c55dbc0b87ff3, type: 3}
@@ -400,6 +400,17 @@ MonoBehaviour:
     propDensity: 0.01
     props:
     - {fileID: 5917395064853871428, guid: bab141a87930ebe4f817baf0d2b9c22a, type: 3}
+  citySize: 250
+  roadPrefab: {fileID: 919132149155446097, guid: 2c024c78142bdf94fa7703dbc554805d, type: 3}
+  buildingPrefabs:
+  - {fileID: 919132149155446097, guid: 966c52ccec243c947ae084ceb90d1c40, type: 3}
+  - {fileID: 919132149155446097, guid: 5a6c03df888103748a347ebb81792d78, type: 3}
+  - {fileID: 919132149155446097, guid: 1ca25b8cc3c02824f927ceedd19ddc1d, type: 3}
+  buildingDensity: 0.2
+  lSystemDepth: 5
+  mainRoadChance: 1
+  subdivisionChance: 1
+  minBlockSize: 5
   tileContainer: {fileID: 0}
 --- !u!4 &1433990520
 Transform:
