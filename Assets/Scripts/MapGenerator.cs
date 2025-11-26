@@ -192,16 +192,34 @@ public class MapGenerator : MonoBehaviour
         }
         else if (IsNearRoad(x, z) && Random.value < buildingDensity && buildingPrefabs.Length > 0)
         {
+            // --- LOGIQUE DE ROTATION ---
+            Quaternion buildingRotation = Quaternion.identity;
+
+            // On regarde où est la route pour orienter la façade
+            // Note : Cela suppose que la "face avant" de ton prefab regarde vers Z+ (Forward)
+            if (roadPositions.Contains(new Vector2Int(x, z + 1)))
+                buildingRotation = Quaternion.Euler(0, 0, 0);       // Route au Nord -> Regarde le Nord
+            else if (roadPositions.Contains(new Vector2Int(x, z - 1)))
+                buildingRotation = Quaternion.Euler(0, 180, 0);     // Route au Sud -> Regarde le Sud
+            else if (roadPositions.Contains(new Vector2Int(x + 1, z)))
+                buildingRotation = Quaternion.Euler(0, 90, 0);      // Route à l'Est -> Regarde l'Est
+            else if (roadPositions.Contains(new Vector2Int(x - 1, z)))
+                buildingRotation = Quaternion.Euler(0, 270, 0);     // Route à l'Ouest -> Regarde l'Ouest
+
+            // Si c'est un coin (plusieurs routes), le 'else if' prendra la première trouvée, ce qui est suffisant.
+
             GameObject b = buildingPrefabs[Random.Range(0, buildingPrefabs.Length)];
 
             GameObject go = Instantiate(
-              b,
-              new Vector3(x, 0.5f, z),
-              Quaternion.Euler(0, Random.Range(0, 360), 0),
-              tile.transform
+                b,
+                new Vector3(x, 0.5f, z),
+                buildingRotation, // On applique la rotation calculée
+                tile.transform
             );
 
-            go.transform.localScale *= Random.Range(0.9f, 1.4f);
+            // J'ai retiré le scale aléatoire excessif pour garder une uniformité urbaine, 
+            // mais tu peux le remettre si tu veux varier la hauteur.
+            go.transform.localScale *= Random.Range(0.95f, 1.1f);
             OptimizeProp(go);
         }
     }
