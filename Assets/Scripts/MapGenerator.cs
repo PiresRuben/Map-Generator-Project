@@ -22,13 +22,9 @@ public class MapGenerator : MonoBehaviour
     [Range(0f, 4f)] public float buildingDensity = 0.015f; // très faible
 
     [Header("L-System / Quadtree")]
-    // Modifié: Augmenter la profondeur max pour plus de détails
     [Range(2, 8)] public int lSystemDepth = 8;
-    // Modifié: Forte chance de créer des routes dans les blocs finaux
     public float mainRoadChance = 0.9f;
-    // Modifié: Très forte chance de subdiviser un bloc ( > 1 pour garantir la division aux premiers niveaux)
     public float subdivisionChance = 1.1f;
-    // Modifié: Réduire la taille minimale pour des blocs plus fins
     public int minBlockSize = 2;
 
     public Transform tileContainer;
@@ -123,41 +119,60 @@ public class MapGenerator : MonoBehaviour
 
     void Subdivide(int x, int z, int w, int h, int depth)
     {
-        // Si le bloc est assez petit OU qu'on a atteint la limite de profondeur
-        // OU que le hasard décide de ne pas subdiviser ce bloc précis :
-        if (depth <= 0 || w < minBlockSize || h < minBlockSize || Random.value > subdivisionChance)
+        if (depth <= 0 || w < minBlockSize * 2 || h < minBlockSize * 2 || Random.value > subdivisionChance)
         {
-            // On dessine une route qui traverse ce bloc (créant une rue finale)
-            if (Random.value < mainRoadChance)
-            {
-                // On choisit aléatoirement si la route est verticale ou horizontale
-                // pour varier l'alignement des quartiers
-                bool vertical = Random.value > 0.5f;
-
-                if (vertical)
-                {
-                    int rx = x + w / 2;
-                    for (int i = z; i < z + h; i++)
-                        roadPositions.Add(new Vector2Int(rx, i));
-                }
-                else
-                {
-                    int rz = z + h / 2;
-                    for (int i = x; i < x + w; i++)
-                        roadPositions.Add(new Vector2Int(i, rz));
-                }
-            }
             return;
         }
 
-        // Si on est ici, c'est qu'on a décidé de subdiviser le bloc en 4 sous-blocs
-        int hw = w / 2;
-        int hh = h / 2;
+        // 1. DÉCALAGE : On choisit un point de coupe aléatoire, pas forcément au milieu.
+        // On s'assure de laisser au moins 'minBlockSize' de chaque côté pour ne pas avoir de routes collées.
+        // Lerp entre 30% et 70% de la largeur/hauteur est une bonne valeur.
+        int splitX = (int)Mathf.Lerp(minBlockSize, w - minBlockSize, Random.Range(0.3f, 0.7f));
+        int splitZ = (int)Mathf.Lerp(minBlockSize, h - minBlockSize, Random.Range(0.3f, 0.7f));
 
-        Subdivide(x, z, hw, hh, depth - 1);
-        Subdivide(x + hw, z, hw, hh, depth - 1);
-        Subdivide(x, z + hh, hw, hh, depth - 1);
-        Subdivide(x + hw, z + hh, hw, hh, depth - 1);
+        // Coordonnées absolues de la coupe dans le monde
+        int roadX = x + splitX;
+        int roadZ = z + splitZ;
+
+        // 2. OMISSION : On décide aléatoirement si on trace la route H et/ou V.
+        // 'mainRoadChance' sert ici de probabilité de "tracer la route".
+        // On force au moins une des deux pour éviter de subdiviser dans le vide.
+        bool drawH = Random.value < mainRoadChance;
+        bool drawV = Random.value < mainRoadChance;
+
+        if (!drawH && !drawV) // Sécurité : si le hasard désactive tout, on réactive l'un des deux
+        {
+            if (Random.value < 0.5f) drawH = true;
+            else drawV = true;
+        }
+
+        // --- TRACÉ DES ROUTES ---
+
+        // Route Horizontale (coupe l'axe Z)
+        if (drawH)
+        {
+            for (int i = x; i < x + w; i++)
+            {
+                // On ne remplace pas une route existante (optimisation)
+                roadPositions.Add(new Vector2Int(i, roadZ));
+            }
+        }
+
+        // Route Verticale (coupe l'axe X)
+        if (drawV)
+        {
+            for (int j = z; j < z + h; j++)
+            {
+                roadPositions.Add(new Vector2Int(roadX, j));
+            }
+        }
+
+        // --- RÉCURSION ---
+        // On passe les nouvelles dimensions basées sur splitX et splitZ
+        Subdivide(x, z, splitX, splitZ, depth - 1); // Bas-Gauche
+        Subdivide(x + splitX, z, w - splitX, splitZ, depth - 1); // Bas-Droite
+        Subdivide(x, z + splitZ, splitX, h - splitZ, depth - 1); // Haut-Gauche
+        Subdivide(x + splitX, z + splitZ, w - splitX, h - splitZ, depth - 1); // Haut-Droite
     }
 
 
