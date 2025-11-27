@@ -4,12 +4,12 @@ using UnityEngine.Rendering;
 
 public class MapGenerator : MonoBehaviour
 {
-    [Header("Dimensions")]
+    [Header("Dimensions Map")]
     public int width = 200;
     public int depth = 200;
     public Vector2 offset;
 
-    [Header("Réglages du Relief Global")]
+    [Header("Réglages du Relief (Nature)")]
     public float scale = 80f;
     public int octaves = 5;
     [Range(0, 1)] public float persistance = 0.5f;
@@ -17,24 +17,33 @@ public class MapGenerator : MonoBehaviour
     public float heightMultiplier = 60f;
     public AnimationCurve heightCurve;
 
-    [Header("Réglages Spécifiques Montagne")]
-    [Range(1f, 5f)]
-    public float mountainExaggeration = 1.5f;
+    [Header("Réglages Montagne & Eau")]
+    [Range(1f, 5f)] public float mountainExaggeration = 1.5f;
+    [Range(0f, 1f)] public float seaLevel = 0.3f;
+    public float bottomLevel = -10f;
 
-    [Header("Réglages Eau & Sol (Nouveau)")]
-    [Range(0f, 1f)] public float seaLevel = 0.3f; // Niveau fixe de l'eau
-    public float bottomLevel = -10f; // Profondeur du socle pour boucher les trous
+    [Header("Réglages Ville (City)")]
+    [Range(0, 250)] public int citySize = 100;
+    [Range(0f, 1f)] public float cityAltitude = 0.35f;
+    public GameObject roadPrefab;
+    public GameObject[] buildingPrefabs;
+    [Range(0f, 1f)] public float buildingDensity = 0.5f;
 
-    [Header("Seed")]
+    [Header("Ville : L-System / Routes")]
+    [Range(2, 8)] public int lSystemDepth = 5;
+    public float mainRoadChance = 0.9f;
+    public float subdivisionChance = 1.1f;
+    public int minBlockSize = 3;
+
+    [Header("Seed & Système")]
     public int seed = 0;
+    public Transform tileContainer;
 
     [Header("Biomes")]
     public BiomePreset[] biomes;
 
-    [Header("Système")]
-    public Transform tileContainer;
-
     private Dictionary<string, Material> biomeMaterials = new Dictionary<string, Material>();
+    private HashSet<Vector2Int> roadPositions = new HashSet<Vector2Int>();
 
     private void Start()
     {
@@ -58,25 +67,17 @@ public class MapGenerator : MonoBehaviour
         }
     }
 
-    void GenerateBiomeMaterials()
-    {
-        biomeMaterials.Clear();
-        foreach (var biome in biomes)
-        {
-            Material mat = new Material(Shader.Find("Standard"));
-            mat.color = biome.color;
-            mat.enableInstancing = true;
-            mat.SetFloat("_SpecularHighlights", 0f);
-            mat.SetFloat("_GlossyReflections", 0f);
-            biomeMaterials.Add(biome.name, mat);
-        }
-    }
 
     public void GenerateMap()
     {
         if (tileContainer != null) Destroy(tileContainer.gameObject);
         GameObject container = new GameObject("MapContainer");
         tileContainer = container.transform;
+
+        roadPositions.Clear();
+        Random.InitState(seed);
+
+        GenerateRoadNetwork();
 
         System.Random prng = new System.Random(seed);
         Vector2[] octaveOffsets = new Vector2[octaves];
@@ -91,39 +92,244 @@ public class MapGenerator : MonoBehaviour
         {
             for (int z = 0; z < depth; z++)
             {
-                // 1. Hauteur de base (Fractal Noise)
-                float noiseHeight = GetFractalNoise(x, z, octaveOffsets);
-
-                // 2. Application de la courbe
-                float finalHeight = heightCurve.Evaluate(noiseHeight);
-
-                // 3. Humidité
-                float moistureValue = Mathf.PerlinNoise((x + seed + 500) / scale, (z + seed + 500) / scale);
-
-                // 4. Choix du biome initial
-                BiomePreset biome = GetBiome(finalHeight, moistureValue);
-
-                // --- GESTION EAU & MONTAGNE ---
-                bool isWater = false;
-
-                // Si la hauteur est sous le niveau de la mer, on force l'eau plate
-                if (finalHeight <= seaLevel)
+                if (IsInCity(x, z))
                 {
-                    isWater = true;
-                    finalHeight = seaLevel; // On aplatit l'eau
-                    biome = GetBiomeByName("Sea"); // On force le biome Mer
+                    CreateCityTile(x, z);
                 }
                 else
                 {
-                    // Si ce n'est pas de l'eau et que c'est une montagne, on exagère la hauteur
-                    if (biome.name == "Mountain")
+                    float noiseHeight = GetFractalNoise(x, z, octaveOffsets);
+                    float finalHeight = heightCurve.Evaluate(noiseHeight);
+                    float moistureValue = Mathf.PerlinNoise((x + seed + 500) / scale, (z + seed + 500) / scale);
+
+                    BiomePreset biome = GetBiome(finalHeight, moistureValue);
+                    bool isWater = false;
+
+                    if (finalHeight <= seaLevel)
+                    {
+                        isWater = true;
+                        finalHeight = seaLevel;
+                        biome = GetBiomeByName("Sea");
+                    }
+                    else if (biome.name == "Mountain")
                     {
                         finalHeight *= mountainExaggeration;
                     }
-                }
 
-                CreateTile(x, z, finalHeight, biome, isWater);
+                    CreateNatureTile(x, z, finalHeight, biome, isWater);
+                }
             }
+        }
+    }
+
+    void GenerateRoadNetwork()
+    {
+        int size = Mathf.Min(citySize, Mathf.Min(width, depth) - 2);
+        if (size <= 0) return;
+
+        int startX = (width / 2) - size / 2;
+        int startZ = (depth / 2) - size / 2;
+
+        for (int x = startX; x < startX + size; x++)
+        {
+            roadPositions.Add(new Vector2Int(x, depth / 2));
+            roadPositions.Add(new Vector2Int(width / 2, x));
+        }
+
+        Subdivide(startX, startZ, size, size, lSystemDepth);
+    }
+
+    void Subdivide(int x, int z, int w, int h, int depth)
+    {
+        if (depth <= 0 || w < minBlockSize * 2 || h < minBlockSize * 2 || Random.value > subdivisionChance)
+            return;
+
+        int splitX = (int)Mathf.Lerp(minBlockSize, w - minBlockSize, Random.Range(0.3f, 0.7f));
+        int splitZ = (int)Mathf.Lerp(minBlockSize, h - minBlockSize, Random.Range(0.3f, 0.7f));
+
+        int roadX = x + splitX;
+        int roadZ = z + splitZ;
+
+        bool drawH = Random.value < mainRoadChance;
+        bool drawV = Random.value < mainRoadChance;
+
+        if (!drawH && !drawV) { if (Random.value < 0.5f) drawH = true; else drawV = true; }
+
+        if (drawH)
+            for (int i = x; i < x + w; i++) roadPositions.Add(new Vector2Int(i, roadZ));
+
+        if (drawV)
+            for (int j = z; j < z + h; j++) roadPositions.Add(new Vector2Int(roadX, j));
+
+        Subdivide(x, z, splitX, splitZ, depth - 1);
+        Subdivide(x + splitX, z, w - splitX, splitZ, depth - 1);
+        Subdivide(x, z + splitZ, splitX, h - splitZ, depth - 1);
+        Subdivide(x + splitX, z + splitZ, w - splitX, h - splitZ, depth - 1);
+    }
+
+    bool IsInCity(int x, int z)
+    {
+        int size = Mathf.Min(citySize, Mathf.Min(width, depth) - 2);
+        if (size <= 0) return false;
+        int sx = width / 2 - size / 2;
+        int sz = depth / 2 - size / 2;
+        return x >= sx && x < sx + size && z >= sz && z < sz + size;
+    }
+
+    void CreateNatureTile(int x, int z, float heightValue, BiomePreset biome, bool isWater)
+    {
+        GameObject tile = GameObject.CreatePrimitive(PrimitiveType.Cube);
+        tile.transform.parent = tileContainer;
+        tile.name = $"Nature_{x}_{z}";
+
+        float worldY = Mathf.Floor(heightValue * heightMultiplier);
+        float floorBottom = bottomLevel;
+        float pillarHeight = worldY - floorBottom;
+
+        tile.transform.localScale = new Vector3(1, pillarHeight, 1);
+        tile.transform.position = new Vector3(x, floorBottom + (pillarHeight / 2), z);
+
+        Renderer rend = tile.GetComponent<Renderer>();
+        if (biomeMaterials.ContainsKey(biome.name))
+        {
+            rend.sharedMaterial = biomeMaterials[biome.name];
+        }
+        OptimizeRenderer(rend);
+
+        if (!isWater)
+        {
+            SpawnNatureProps(tile.transform, biome, pillarHeight);
+        }
+    }
+
+    void CreateCityTile(int x, int z)
+    {
+        GameObject tile = GameObject.CreatePrimitive(PrimitiveType.Cube);
+        tile.transform.parent = tileContainer;
+        tile.name = $"City_{x}_{z}";
+
+        float safeCityHeight = Mathf.Max(cityAltitude, seaLevel + 0.05f);
+        float worldY = Mathf.Floor(safeCityHeight * heightMultiplier);
+        float floorBottom = bottomLevel;
+        float pillarHeight = worldY - floorBottom;
+
+        tile.transform.localScale = new Vector3(1, pillarHeight, 1);
+        tile.transform.position = new Vector3(x, floorBottom + (pillarHeight / 2), z);
+
+        bool isRoad = roadPositions.Contains(new Vector2Int(x, z));
+
+        Renderer rend = tile.GetComponent<Renderer>();
+        Material cityMat = new Material(Shader.Find("Standard"));
+        cityMat.color = isRoad ? new Color(0.1f, 0.1f, 0.1f) : new Color(0.8f, 0.8f, 0.8f);
+        cityMat.enableInstancing = true;
+        rend.material = cityMat;
+        OptimizeRenderer(rend);
+
+        Vector3 topPosition = new Vector3(x, floorBottom + pillarHeight, z);
+
+        if (isRoad && roadPrefab != null)
+        {
+            GameObject road = Instantiate(roadPrefab, topPosition, Quaternion.identity, tile.transform);
+
+            float targetThickness = 0.02f;
+            road.transform.localScale = new Vector3(1, targetThickness / pillarHeight, 1);
+
+            OptimizeProp(road);
+        }
+        else if (IsNearRoad(x, z) && Random.value < buildingDensity && buildingPrefabs.Length > 0)
+        {
+            SpawnBuilding(x, z, topPosition, tile.transform, pillarHeight);
+        }
+    }
+
+    void SpawnBuilding(int x, int z, Vector3 position, Transform parent, float pillarScaleY)
+    {
+        Quaternion rot = Quaternion.identity;
+        if (roadPositions.Contains(new Vector2Int(x, z + 1))) rot = Quaternion.Euler(0, 0, 0);
+        else if (roadPositions.Contains(new Vector2Int(x, z - 1))) rot = Quaternion.Euler(0, 180, 0);
+        else if (roadPositions.Contains(new Vector2Int(x + 1, z))) rot = Quaternion.Euler(0, 90, 0);
+        else if (roadPositions.Contains(new Vector2Int(x - 1, z))) rot = Quaternion.Euler(0, 270, 0);
+
+        GameObject prefab = buildingPrefabs[Random.Range(0, buildingPrefabs.Length)];
+        GameObject building = Instantiate(prefab, position, rot, parent);
+
+        Vector3 originalScale = Vector3.one * Random.Range(0.9f, 1.1f);
+        building.transform.localScale = new Vector3(originalScale.x, originalScale.y / pillarScaleY, originalScale.z);
+
+        OptimizeProp(building);
+    }
+
+    bool IsNearRoad(int x, int z)
+    {
+        for (int i = -1; i <= 1; i++)
+            for (int j = -1; j <= 1; j++)
+                if (roadPositions.Contains(new Vector2Int(x + i, z + j))) return true;
+        return false;
+    }
+
+    void SpawnNatureProps(Transform parentTile, BiomePreset biome, float pillarScaleY)
+    {
+        if (biome.props.Length == 0) return;
+
+        float actualDensity = biome.propDensity;
+        if (biome.name == "Mountain") actualDensity *= 0.5f;
+
+        if (Random.value < actualDensity)
+        {
+            GameObject propPrefab = biome.props[Random.Range(0, biome.props.Length)];
+            if (propPrefab != null)
+            {
+                Vector3 spawnPos = new Vector3(parentTile.position.x, parentTile.position.y + (pillarScaleY / 2), parentTile.position.z);
+
+                GameObject prop = Instantiate(propPrefab, spawnPos + Vector3.up * 0.5f, Quaternion.identity);
+                prop.transform.parent = parentTile;
+
+                Vector3 originalScale = Vector3.one * Random.Range(0.8f, 1.2f);
+                prop.transform.localScale = new Vector3(originalScale.x, originalScale.y / pillarScaleY, originalScale.z);
+                prop.transform.Rotate(0, Random.Range(0, 360), 0);
+
+                OptimizeProp(prop);
+            }
+        }
+    }
+
+    void OptimizeRenderer(Renderer r)
+    {
+        r.shadowCastingMode = ShadowCastingMode.Off;
+        r.receiveShadows = false;
+        r.lightProbeUsage = LightProbeUsage.Off;
+        r.reflectionProbeUsage = ReflectionProbeUsage.Off;
+    }
+
+    void OptimizeProp(GameObject prop)
+    {
+        Renderer[] renderers = prop.GetComponentsInChildren<Renderer>();
+        foreach (Renderer r in renderers)
+        {
+            OptimizeRenderer(r);
+            foreach (Material mat in r.sharedMaterials)
+            {
+                if (mat != null)
+                {
+                    mat.enableInstancing = true;
+                    mat.SetFloat("_SpecularHighlights", 0f);
+                    mat.SetFloat("_GlossyReflections", 0f);
+                }
+            }
+        }
+    }
+
+    void GenerateBiomeMaterials()
+    {
+        biomeMaterials.Clear();
+        foreach (var biome in biomes)
+        {
+            Material mat = new Material(Shader.Find("Standard"));
+            mat.color = biome.color;
+            mat.enableInstancing = true;
+            mat.SetFloat("_SpecularHighlights", 0f);
+            mat.SetFloat("_GlossyReflections", 0f);
+            biomeMaterials.Add(biome.name, mat);
         }
     }
 
@@ -147,95 +353,8 @@ public class MapGenerator : MonoBehaviour
         return noiseHeight / maxPossibleHeight;
     }
 
-    void CreateTile(int x, int z, float heightValue, BiomePreset biome, bool isWater)
-    {
-        GameObject tile = GameObject.CreatePrimitive(PrimitiveType.Cube);
-        tile.transform.parent = tileContainer;
-
-        // --- CORRECTION TROUS (Mode Pilier) ---
-
-        // 1. Calcul de la hauteur Y du sommet du bloc
-        float worldY = Mathf.Floor(heightValue * heightMultiplier);
-
-        // 2. Définition du bas du bloc (le socle)
-        float floorBottom = bottomLevel;
-
-        // 3. Calcul de la taille totale du pilier
-        float pillarHeight = worldY - floorBottom;
-
-        // 4. Étirement du cube pour qu'il aille du fond jusqu'à la surface
-        tile.transform.localScale = new Vector3(1, pillarHeight, 1);
-
-        // 5. Positionnement au centre du cube étiré
-        tile.transform.position = new Vector3(x, floorBottom + (pillarHeight / 2), z);
-
-
-        Renderer rend = tile.GetComponent<Renderer>();
-        if (biomeMaterials.ContainsKey(biome.name))
-        {
-            rend.sharedMaterial = biomeMaterials[biome.name];
-        }
-        rend.shadowCastingMode = ShadowCastingMode.Off;
-        rend.receiveShadows = false;
-
-        // On ne fait spawn les props que si ce n'est pas de l'eau
-        if (!isWater)
-        {
-            SpawnProps(tile.transform, biome, pillarHeight);
-        }
-    }
-
-    void SpawnProps(Transform parentTile, BiomePreset biome, float pillarScaleY)
-    {
-        if (biome.props.Length == 0) return;
-
-        float actualDensity = biome.propDensity;
-        if (biome.name == "Mountain") actualDensity *= 0.5f;
-
-        if (Random.value < actualDensity)
-        {
-            GameObject propPrefab = biome.props[Random.Range(0, biome.props.Length)];
-            if (propPrefab != null)
-            {
-                // Positionnement sur le haut du pilier
-                Vector3 spawnPos = new Vector3(parentTile.position.x, parentTile.position.y + (pillarScaleY / 2), parentTile.position.z);
-
-                GameObject prop = Instantiate(propPrefab, spawnPos + Vector3.up * 0.5f, Quaternion.identity);
-                prop.transform.parent = parentTile;
-
-                // CORRECTION ÉCHELLE : On compense l'étirement du parent
-                // Si le sol fait 20m de haut, on divise la taille de l'arbre par 20 sur l'axe Y
-                Vector3 originalScale = Vector3.one * Random.Range(0.8f, 1.2f);
-                prop.transform.localScale = new Vector3(originalScale.x, originalScale.y / pillarScaleY, originalScale.z);
-
-                prop.transform.Rotate(0, Random.Range(0, 360), 0);
-                OptimizeProp(prop);
-            }
-        }
-    }
-
-    void OptimizeProp(GameObject prop)
-    {
-        Renderer[] renderers = prop.GetComponentsInChildren<Renderer>();
-        foreach (Renderer r in renderers)
-        {
-            r.shadowCastingMode = ShadowCastingMode.Off;
-            r.receiveShadows = false;
-            foreach (Material mat in r.sharedMaterials)
-            {
-                if (mat != null)
-                {
-                    mat.enableInstancing = true;
-                    mat.SetFloat("_SpecularHighlights", 0f);
-                    mat.SetFloat("_GlossyReflections", 0f);
-                }
-            }
-        }
-    }
-
     BiomePreset GetBiome(float height, float moisture)
     {
-        // La mer est gérée avant l'appel de cette fonction via seaLevel
         if (height > 0.65f) return GetBiomeByName("Mountain");
         if (moisture < 0.4f) return GetBiomeByName("Desert");
         return GetBiomeByName("GrassField");
@@ -247,6 +366,7 @@ public class MapGenerator : MonoBehaviour
         return biomes[0];
     }
 }
+
 [System.Serializable]
 public struct BiomePreset
 {

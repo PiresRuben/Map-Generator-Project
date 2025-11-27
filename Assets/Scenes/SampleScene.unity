@@ -401,7 +401,22 @@ MonoBehaviour:
     m_PostInfinity: 2
     m_RotationOrder: 4
   mountainExaggeration: 1
+  seaLevel: 0.3
+  bottomLevel: -10
+  citySize: 100
+  cityAltitude: 0.35
+  roadPrefab: {fileID: 8465794119399834790, guid: a8bf60db8442e1a47ad4ca6cb264f344, type: 3}
+  buildingPrefabs:
+  - {fileID: 919132149155446097, guid: 1ca25b8cc3c02824f927ceedd19ddc1d, type: 3}
+  - {fileID: 919132149155446097, guid: 493d61a556203c34fb3a8fc8230a7b38, type: 3}
+  - {fileID: 919132149155446097, guid: 850c2d8ee6b081d4abbcd5c7fa582cd6, type: 3}
+  buildingDensity: 0.2
+  lSystemDepth: 6
+  mainRoadChance: 1
+  subdivisionChance: 1
+  minBlockSize: 3
   seed: 3
+  tileContainer: {fileID: 0}
   biomes:
   - name: Sea
     color: {r: 0, g: 0, b: 1, a: 1}
@@ -428,7 +443,6 @@ MonoBehaviour:
     propDensity: 0
     props:
     - {fileID: 5917395064853871428, guid: bab141a87930ebe4f817baf0d2b9c22a, type: 3}
-  tileContainer: {fileID: 0}
 --- !u!4 &1433990520
 Transform:
   m_ObjectHideFlags: 0
