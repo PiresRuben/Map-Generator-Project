@@ -5,7 +5,7 @@ using UnityEngine.Rendering;
 public class MapGenerator : MonoBehaviour
 {
     [Header("Dimensions")]
-    public int width = 200; // Réduit un peu par défaut pour les tests
+    public int width = 200;
     public int depth = 200;
     public Vector2 offset;
 
@@ -14,14 +14,16 @@ public class MapGenerator : MonoBehaviour
     public int octaves = 5;
     [Range(0, 1)] public float persistance = 0.5f;
     public float lacunarity = 2f;
-    // AUGMENTE CE CHIFFRE POUR DU VRAI RELIEF (ex: 60)
     public float heightMultiplier = 60f;
     public AnimationCurve heightCurve;
 
     [Header("Réglages Spécifiques Montagne")]
-    // NOUVEAU : Force les montagnes à être beaucoup plus hautes et pentues
     [Range(1f, 5f)]
     public float mountainExaggeration = 1.5f;
+
+    [Header("Réglages Eau & Sol (Nouveau)")]
+    [Range(0f, 1f)] public float seaLevel = 0.3f; // Niveau fixe de l'eau
+    public float bottomLevel = -10f; // Profondeur du socle pour boucher les trous
 
     [Header("Seed")]
     public int seed = 0;
@@ -38,7 +40,6 @@ public class MapGenerator : MonoBehaviour
     {
         if (seed == 0) seed = Random.Range(0, 100000);
 
-        // Initialisation d'une courbe en "S" par défaut si elle est vide pour un meilleur résultat immédiat
         if (heightCurve == null || heightCurve.length < 2)
         {
             heightCurve = new AnimationCurve(new Keyframe(0, 0), new Keyframe(0.5f, 0.2f), new Keyframe(1, 1));
@@ -96,21 +97,32 @@ public class MapGenerator : MonoBehaviour
                 // 2. Application de la courbe
                 float finalHeight = heightCurve.Evaluate(noiseHeight);
 
-                // 3. Humidité pour les biomes
+                // 3. Humidité
                 float moistureValue = Mathf.PerlinNoise((x + seed + 500) / scale, (z + seed + 500) / scale);
 
-                // 4. Choix du biome
+                // 4. Choix du biome initial
                 BiomePreset biome = GetBiome(finalHeight, moistureValue);
 
-                // --- LE FIX POUR LA MONTAGNE DE CUBES ---
-                // Si le biome choisi est une montagne, on applique un bonus de hauteur
-                // Cela va créer des falaises de cubes entre la plaine et la montagne.
-                if (biome.name == "Mountain")
+                // --- GESTION EAU & MONTAGNE ---
+                bool isWater = false;
+
+                // Si la hauteur est sous le niveau de la mer, on force l'eau plate
+                if (finalHeight <= seaLevel)
                 {
-                    finalHeight *= mountainExaggeration;
+                    isWater = true;
+                    finalHeight = seaLevel; // On aplatit l'eau
+                    biome = GetBiomeByName("Sea"); // On force le biome Mer
+                }
+                else
+                {
+                    // Si ce n'est pas de l'eau et que c'est une montagne, on exagère la hauteur
+                    if (biome.name == "Mountain")
+                    {
+                        finalHeight *= mountainExaggeration;
+                    }
                 }
 
-                CreateTile(x, z, finalHeight, biome);
+                CreateTile(x, z, finalHeight, biome, isWater);
             }
         }
     }
@@ -135,17 +147,28 @@ public class MapGenerator : MonoBehaviour
         return noiseHeight / maxPossibleHeight;
     }
 
-    void CreateTile(int x, int z, float heightValue, BiomePreset biome)
+    void CreateTile(int x, int z, float heightValue, BiomePreset biome, bool isWater)
     {
         GameObject tile = GameObject.CreatePrimitive(PrimitiveType.Cube);
         tile.transform.parent = tileContainer;
 
-        // Calcul de la position Y finale (l'aspect "blocs")
-        float yPos = Mathf.Floor(heightValue * heightMultiplier);
+        // --- CORRECTION TROUS (Mode Pilier) ---
 
-        if (biome.name == "Sea") yPos = Mathf.Floor(0.2f * heightMultiplier);
+        // 1. Calcul de la hauteur Y du sommet du bloc
+        float worldY = Mathf.Floor(heightValue * heightMultiplier);
 
-        tile.transform.position = new Vector3(x, yPos, z);
+        // 2. Définition du bas du bloc (le socle)
+        float floorBottom = bottomLevel;
+
+        // 3. Calcul de la taille totale du pilier
+        float pillarHeight = worldY - floorBottom;
+
+        // 4. Étirement du cube pour qu'il aille du fond jusqu'à la surface
+        tile.transform.localScale = new Vector3(1, pillarHeight, 1);
+
+        // 5. Positionnement au centre du cube étiré
+        tile.transform.position = new Vector3(x, floorBottom + (pillarHeight / 2), z);
+
 
         Renderer rend = tile.GetComponent<Renderer>();
         if (biomeMaterials.ContainsKey(biome.name))
@@ -155,13 +178,17 @@ public class MapGenerator : MonoBehaviour
         rend.shadowCastingMode = ShadowCastingMode.Off;
         rend.receiveShadows = false;
 
-        SpawnProps(tile.transform, biome);
+        // On ne fait spawn les props que si ce n'est pas de l'eau
+        if (!isWater)
+        {
+            SpawnProps(tile.transform, biome, pillarHeight);
+        }
     }
 
-    void SpawnProps(Transform parentTile, BiomePreset biome)
+    void SpawnProps(Transform parentTile, BiomePreset biome, float pillarScaleY)
     {
         if (biome.props.Length == 0) return;
-        // Réduction de la densité sur les pentes abruptes (optionnel, pour le réalisme)
+
         float actualDensity = biome.propDensity;
         if (biome.name == "Mountain") actualDensity *= 0.5f;
 
@@ -170,9 +197,17 @@ public class MapGenerator : MonoBehaviour
             GameObject propPrefab = biome.props[Random.Range(0, biome.props.Length)];
             if (propPrefab != null)
             {
-                // Ajustement de la position Y pour que l'objet soit posé sur le cube, pas dedans
-                GameObject prop = Instantiate(propPrefab, parentTile.position + Vector3.up * 0.5f, Quaternion.identity);
+                // Positionnement sur le haut du pilier
+                Vector3 spawnPos = new Vector3(parentTile.position.x, parentTile.position.y + (pillarScaleY / 2), parentTile.position.z);
+
+                GameObject prop = Instantiate(propPrefab, spawnPos + Vector3.up * 0.5f, Quaternion.identity);
                 prop.transform.parent = parentTile;
+
+                // CORRECTION ÉCHELLE : On compense l'étirement du parent
+                // Si le sol fait 20m de haut, on divise la taille de l'arbre par 20 sur l'axe Y
+                Vector3 originalScale = Vector3.one * Random.Range(0.8f, 1.2f);
+                prop.transform.localScale = new Vector3(originalScale.x, originalScale.y / pillarScaleY, originalScale.z);
+
                 prop.transform.Rotate(0, Random.Range(0, 360), 0);
                 OptimizeProp(prop);
             }
@@ -200,8 +235,7 @@ public class MapGenerator : MonoBehaviour
 
     BiomePreset GetBiome(float height, float moisture)
     {
-        if (height < 0.3f) return GetBiomeByName("Sea");
-        // J'ai baissé le seuil de la montagne pour qu'elle apparaisse plus souvent
+        // La mer est gérée avant l'appel de cette fonction via seaLevel
         if (height > 0.65f) return GetBiomeByName("Mountain");
         if (moisture < 0.4f) return GetBiomeByName("Desert");
         return GetBiomeByName("GrassField");
